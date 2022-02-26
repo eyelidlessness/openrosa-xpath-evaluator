@@ -41,8 +41,9 @@ module.exports = function(wrapped, extensions) {
   const
     extendedFuncs = extensions.func || {},
     extendedProcessors = extensions.process || {},
-    toInternalResult = function(r) {
+    toInternalResult = function(r, filterNodes = (v) => v) {
       let v, i, ordrd;
+
       switch(r.resultType) {
         case XPathResult.NUMBER_TYPE:  return { t:'num',  v:r.numberValue  };
         case XPathResult.BOOLEAN_TYPE: return { t:'bool', v:r.booleanValue };
@@ -52,25 +53,31 @@ module.exports = function(wrapped, extensions) {
           /* falls through */
         case XPathResult.UNORDERED_NODE_ITERATOR_TYPE:
           v = [];
+
           while((i = r.iterateNext())) v.push(i);
-          return { t:'arr', v, ordrd };
+          console.log('toInternal', r.resultType, v);
+          return { t:'arr', v: filterNodes(v), ordrd };
         case XPathResult.ORDERED_NODE_SNAPSHOT_TYPE:
           ordrd = true;
           /* falls through */
-        case XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE:
+        case XPathResult.UNORDERED_NODE_SNAPSHOT_TYPE: {
           v = [];
           for(i=0; i<r.snapshotLength; ++i) {
             v.push(r.snapshotItem(i));
           }
-          return { t:'arr', v, ordrd };
+
+          return { t:'arr', v: filterNodes(v), ordrd };
+        }
         case XPathResult.ANY_UNORDERED_NODE_TYPE:
         case XPathResult.FIRST_ORDERED_NODE_TYPE:
-          return { t:'arr', v:[r.singleNodeValue] };
+          return { t:'arr', v:filterNodes([r.singleNodeValue]) };
         default:
           throw new Error(`no handling for result type: ${r.resultType}`);
       }
     },
     toExternalResult = function(r, rt) {
+      console.log('toExternal', r, rt);
+
       if(extendedProcessors.toExternalResult) {
         const res = extendedProcessors.toExternalResult(r, rt);
         if(res) return res;
@@ -112,9 +119,26 @@ module.exports = function(wrapped, extensions) {
     };
 
   /**
-   * @see https://developer.mozilla.org/en-US/docs/Web/API/Document/evaluate
+   * @typedef EvaluateOptions
+   * @property {number} [contextSize]
+   * @property {number} [contextPosition]
+   * @property {(nodes: Node[]) => Node[]} [filterNodes]
    */
-  const evaluate = this.evaluate = function(input, cN, nR, rT, _, contextSize=1, contextPosition=1) {
+
+  /**
+   * @see https://developer.mozilla.org/en-US/docs/Web/API/Document/evaluate
+   *
+   * @param {string} input
+   * @param {Node} cN
+   * @param {(ns: string) => string} nR
+   * @param {number} rT
+   * @param {Node} [_]
+   * @param {number} [contextSize]
+   * @param {number} [contextPosition]
+   * @param {(nodes: Node[]) => Node[]} [filterNodes]
+   */
+  const evaluate = this.evaluate = function(input, cN, nR, rT, _, contextSize = 1, contextPosition = 1, filterNodes = (nodes) => nodes) {
+
     let i, cur;
     const stack = [{ t:'root', tokens:[] }],
       peek = () => stack[stack.length-1],
@@ -189,7 +213,7 @@ module.exports = function(wrapped, extensions) {
             // there aren't any other native types TODO do we need a hook for allowing date conversion?
           }
         }
-        return toInternalResult(wrapped.evaluate(argString + ')', cN, nR, XPathResult.ANY_TYPE, null));
+        return toInternalResult(wrapped.evaluate(argString + ')', cN, nR, XPathResult.ANY_TYPE, null), filterNodes);
       },
       evalOp = function(lhs, op, rhs) {
         if(op > AND && (lhs === D || rhs === D)) {
@@ -240,12 +264,12 @@ module.exports = function(wrapped, extensions) {
           expr = wrapped.createExpression('.' + expr, nR);
           const newNodeset = [];
           prev.v.forEach(node => {
-            const res = toInternalResult(expr.evaluate(node));
+            const res = toInternalResult(expr.evaluate(node), filterNodes);
             newNodeset.push(...res.v);
           });
           prev.v = newNodeset;
         } else {
-          pushToken(toInternalResult(wrapped.evaluate(expr, cN, nR, XPathResult.ANY_TYPE, null)));
+          pushToken(toInternalResult(wrapped.evaluate(expr, cN, nR, XPathResult.ANY_TYPE, null), filterNodes));
         }
 
         newCurrent();
@@ -316,7 +340,7 @@ module.exports = function(wrapped, extensions) {
             const expr = cur.v;
             const filteredNodes = contextNodes
               .filter((cN, i) => {
-                const res = toInternalResult(evaluate(expr, cN, nR, XPathResult.ANY_TYPE, null, contextNodes.length, i+1));
+                const res = toInternalResult(evaluate(expr, cN, nR, XPathResult.ANY_TYPE, null, contextNodes.length, i+1), filterNodes);
                 return res.t === 'num' ? asNumber(res) === 1+i : asBoolean(res);
               });
 
