@@ -3,6 +3,27 @@
 // these functions would probably more appropriately be in utils/date.js
 
 /**
+ * Consistent with JavaRosa, the following should produce an empty string:
+ *
+ * - `date('')`
+ * - `format-date('')`
+ * - `format-date(date(''))`
+ *
+ * Conversions of `date('')` to a number is still invalid. This behavior
+ * deviates from JavaRosa by producing 'Invalid Date' rather than `NaN`,
+ * for consistency with historical behavior.
+ */
+class BlankDate extends Date {
+  constructor() {
+    super(NaN);
+  }
+
+  toString() {
+    return '';
+  }
+}
+
+/**
  * Converts a native Date UTC String to a RFC 3339-compliant date string with local offsets
  * used in ODK, so it replaces the Z in the ISOstring with a local offset
  * @param {Date} date
@@ -11,8 +32,10 @@
 const toISOLocalString = (date) => {
   //2012-09-05T12:57:00.000-04:00 (ODK)
 
-  if(date.toString() === 'Invalid Date') {
-    return date.toString();
+  const dateString = date.toString();
+
+  if(dateString === '' || dateString === 'Invalid Date') {
+    return dateString;
   }
 
   var dt = new Date(date.getTime() - (date.getTimezoneOffset() * 60 * 1000)).toISOString()
@@ -68,6 +91,7 @@ Date.prototype.getTimezoneOffsetAsTime = function() {
 };
 
 module.exports = {
+  BlankDate,
   getTimezoneOffsetAsTime,
   toISOLocalString,
 };
